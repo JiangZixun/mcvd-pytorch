@@ -5,6 +5,7 @@ import torchvision.transforms as transforms
 from torchvision.datasets import CIFAR10, LSUN
 from torch.utils.data import DataLoader
 
+from datasets.himawari_22to23 import Xiaoshan_6steps_30min_Dataset, Xiaoshan_6steps_30min_Test_Dataset
 from datasets.celeba import CelebA
 # from datasets.ffhq import FFHQ
 from datasets.imagenet import ImageNetDataset
@@ -17,7 +18,8 @@ from datasets.ucf101 import UCF101Dataset
 from torch.utils.data import Subset
 
 
-DATASETS = ['CIFAR10', 'CELEBA', 'LSUN', 'FFHQ', 'IMAGENET', 'MOVINGMNIST', 'STOCHASTICMOVINGMNIST', 'BAIR', 'KTH', 'CITYSCAPES', 'UCF101']
+# DATASETS = ['CIFAR10', 'CELEBA', 'LSUN', 'FFHQ', 'IMAGENET', 'MOVINGMNIST', 'STOCHASTICMOVINGMNIST', 'BAIR', 'KTH', 'CITYSCAPES', 'UCF101']
+DATASETS = ['HIMAWARI', 'CIFAR10', 'CELEBA', 'LSUN', 'FFHQ', 'IMAGENET', 'MOVINGMNIST', 'STOCHASTICMOVINGMNIST', 'BAIR', 'KTH', 'CITYSCAPES', 'UCF101']
 
 
 def get_dataloaders(data_path, config):
@@ -49,6 +51,22 @@ def get_dataset(data_path, config, video_frames_pred=0, start_at=0):
             transforms.Resize(config.data.image_size),
             transforms.ToTensor()
         ])
+
+    if config.data.dataset.upper() == 'HIMAWARI':
+        dataset = Xiaoshan_6steps_30min_Dataset(
+            data_path=config.data.train_data_path,
+            json_path=config.data.train_json_path,
+            dataset_prefix=config.data.train_prefix,
+            train_ratio=config.data.train_ratio,
+            split='train',
+            # transform=tran_transform
+        )
+        test_dataset = Xiaoshan_6steps_30min_Test_Dataset(
+            data_path=config.data.test_data_path,
+            json_path=config.data.test_json_path,
+            dataset_prefix=config.data.test_prefix,
+            # transform=test_transform
+        )
 
     if config.data.dataset.upper() == 'CIFAR10':
         dataset = CIFAR10(data_path, train=True, download=True,
@@ -82,7 +100,6 @@ def get_dataset(data_path, config, video_frames_pred=0, start_at=0):
                                   transforms.Resize(config.data.image_size),
                                   transforms.ToTensor(),
                               ]), download=True)
-
 
     elif config.data.dataset.upper() == 'LSUN':
         train_folder = '{}_train'.format(config.data.category)

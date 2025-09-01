@@ -48,6 +48,7 @@ from models.ema import EMAHelper
 from models.fvd.fvd import get_fvd_feats, frechet_distance, load_i3d_pretrained
 from models.unet import UNet_SMLD, UNet_DDPM
 #import pdb; pdb.set_trace()
+from tqdm import tqdm
 
 __all__ = ['NCSNRunner']
 
@@ -334,7 +335,7 @@ class NCSNRunner():
             def test_tb_hook():
                 pass
 
-        print(scorenet)
+        # print(scorenet)
         net = scorenet.module if hasattr(scorenet, 'module') else scorenet
 
         # Conditional
@@ -2200,7 +2201,8 @@ class NCSNRunner():
 
         def image_metric_stuff(metric):
             avg_metric, std_metric = metric.mean().item(), metric.std().item()
-            conf95_metric = avg_metric - float(st.norm.interval(alpha=0.95, loc=avg_metric, scale=st.sem(metric))[0])
+            # conf95_metric = avg_metric - float(st.norm.interval(alpha=0.95, loc=avg_metric, scale=st.sem(metric))[0])
+            conf95_metric = avg_metric - float(st.norm.interval(confidence=0.95, loc=avg_metric, scale=st.sem(metric))[0])
             return avg_metric, std_metric, conf95_metric
 
         avg_mse, std_mse, conf95_mse = image_metric_stuff(mse_list)
