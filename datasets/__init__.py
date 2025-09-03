@@ -6,6 +6,7 @@ from torchvision.datasets import CIFAR10, LSUN
 from torch.utils.data import DataLoader
 
 from datasets.himawari_22to23 import Xiaoshan_6steps_30min_Dataset, Xiaoshan_6steps_30min_Test_Dataset
+from datasets.himawari_22to23_1c import Xiaoshan_6steps_30min_Dataset_1C, Xiaoshan_6steps_30min_Test_Dataset_1C
 from datasets.celeba import CelebA
 # from datasets.ffhq import FFHQ
 from datasets.imagenet import ImageNetDataset
@@ -19,7 +20,7 @@ from torch.utils.data import Subset
 
 
 # DATASETS = ['CIFAR10', 'CELEBA', 'LSUN', 'FFHQ', 'IMAGENET', 'MOVINGMNIST', 'STOCHASTICMOVINGMNIST', 'BAIR', 'KTH', 'CITYSCAPES', 'UCF101']
-DATASETS = ['HIMAWARI', 'CIFAR10', 'CELEBA', 'LSUN', 'FFHQ', 'IMAGENET', 'MOVINGMNIST', 'STOCHASTICMOVINGMNIST', 'BAIR', 'KTH', 'CITYSCAPES', 'UCF101']
+DATASETS = ['HIMAWARI', 'HIMAWARI1C', 'CIFAR10', 'CELEBA', 'LSUN', 'FFHQ', 'IMAGENET', 'MOVINGMNIST', 'STOCHASTICMOVINGMNIST', 'BAIR', 'KTH', 'CITYSCAPES', 'UCF101']
 
 
 def get_dataloaders(data_path, config):
@@ -68,7 +69,23 @@ def get_dataset(data_path, config, video_frames_pred=0, start_at=0):
             # transform=test_transform
         )
 
-    if config.data.dataset.upper() == 'CIFAR10':
+    elif config.data.dataset.upper() == 'HIMAWARI1C':
+        dataset = Xiaoshan_6steps_30min_Dataset_1C(
+            data_path=config.data.train_data_path,
+            json_path=config.data.train_json_path,
+            dataset_prefix=config.data.train_prefix,
+            train_ratio=config.data.train_ratio,
+            split='train',
+            # transform=tran_transform
+        )
+        test_dataset = Xiaoshan_6steps_30min_Test_Dataset_1C(
+            data_path=config.data.test_data_path,
+            json_path=config.data.test_json_path,
+            dataset_prefix=config.data.test_prefix,
+            # transform=test_transform
+        )
+
+    elif config.data.dataset.upper() == 'CIFAR10':
         dataset = CIFAR10(data_path, train=True, download=True,
                           transform=tran_transform)
         test_dataset = CIFAR10(data_path, train=False, download=True,

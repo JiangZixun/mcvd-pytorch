@@ -36,7 +36,7 @@ from datasets import get_dataset, data_transform, inverse_data_transform
 from datasets.ffhq_tfrecords import FFHQ_TFRecordsDataLoader
 from evaluation.fid_PR import get_fid, get_fid_PR, get_stats_path, get_feats_path
 from losses import get_optimizer, warmup_lr
-from losses.dsm import anneal_dsm_score_estimation
+from losses.dsm import anneal_dsm_score_estimation_dwp
 from models import (ddpm_sampler,
                     ddim_sampler,
                     FPNDM_sampler,
@@ -54,6 +54,7 @@ from tqdm import tqdm
 import wandb
 from omegaconf import OmegaConf
 import cv2
+from einops import rearrange
 
 def _to_uint8(x):
     # 假设 x ∈ [0,1]（你前面做过归一化），否则请先按你的范围规范化
@@ -111,7 +112,7 @@ def make_viz_img(f, rgb_bands=None):
     return vis
 
 
-__all__ = ['NCSNRunner']
+__all__ = ['NCSNRunner_DWP']
 
 
 def count_training_parameters(model):
@@ -256,7 +257,84 @@ def get_model(config):
     else:
         Exception("arch is not valid [ncsn, unet, unetmore, unetmore3d]")
 
-class NCSNRunner():
+
+def get_deterministic_model(config):
+    import os
+    import torch
+    from collections import OrderedDict
+
+    # -------- helpers --------
+    def cfg_get(cfg, key, default=None):
+        """兼容 dict / Namespace 的读取"""
+        if isinstance(cfg, dict):
+            return cfg.get(key, default)
+        return getattr(cfg, key, default)
+
+    model_cfg = config.d_model  # 可能是 dict，也可能是 Namespace
+
+    from models.deterministic_model import RFDPIC
+
+    model = RFDPIC(
+        dp_name=cfg_get(model_cfg, 'dp_name'),
+        rf_name=cfg_get(model_cfg, 'rf_name'),
+        rf_dp_config_file=cfg_get(model_cfg, 'rf_dp_config_file'),
+        dp_mode=cfg_get(model_cfg, 'dp_mode'),
+        rf_mode=cfg_get(model_cfg, 'rf_mode'),
+        alpha=cfg_get(model_cfg, 'alpha'),
+        interpolation_mode=cfg_get(model_cfg, 'interpolation_mode'),
+        padding_mode=cfg_get(model_cfg, 'padding_mode'),
+    )
+
+    # -------- 1) 预训练权重加载（可选） --------
+    pretrained_path = getattr(config, "pretrained_pt", None)
+    if pretrained_path is None:
+        pretrained_path = cfg_get(model_cfg, "pretrained_pt", None)
+
+    if pretrained_path:
+        if not os.path.isfile(pretrained_path):
+            raise FileNotFoundError(f"Pretrained checkpoint not found: {pretrained_path}")
+
+        ckpt = torch.load(pretrained_path, map_location="cpu", weights_only=False)
+
+        # 兼容不同保存方式
+        candidate_keys = ["state_dict", "model", "ema", "model_state_dict", "net", "module"]
+        if isinstance(ckpt, dict):
+            state = None
+            for k in candidate_keys:
+                if k in ckpt and isinstance(ckpt[k], dict):
+                    state = ckpt[k]
+                    break
+            if state is None:
+                # 纯 state_dict 场景
+                state = {k: v for k, v in ckpt.items() if isinstance(v, torch.Tensor)}
+        else:
+            raise ValueError(f"Unexpected checkpoint type: {type(ckpt)}")
+
+        # 去掉 'module.' 前缀
+        cleaned = OrderedDict()
+        for k, v in state.items():
+            nk = k[7:] if k.startswith("module.") else k
+            cleaned[nk] = v
+
+        missing, unexpected = model.load_state_dict(cleaned, strict=True)
+        if missing:
+            print(f"[load] missing keys ({len(missing)}): {missing[:8]}{' ...' if len(missing)>8 else ''}")
+        if unexpected:
+            print(f"[load] unexpected keys ({len(unexpected)}): {unexpected[:8]}{' ...' if len(unexpected)>8 else ''}")
+        print(f"[load] loaded weights from: {pretrained_path}")
+
+    # -------- 2) 冻结梯度（可选） --------
+    freeze_flag = getattr(config, "freeze_d_model", False) or cfg_get(model_cfg, "freeze", False)
+    if freeze_flag:
+        for p in model.parameters():
+            p.requires_grad = False
+        model.eval()
+        print("[freeze] deterministic model parameters are frozen (no grad).")
+
+    return model
+
+
+class NCSNRunner_DWP():
     def __init__(self, args, config, config_uncond):
         self.args = args
         self.config = config
@@ -333,6 +411,9 @@ class NCSNRunner():
 
         scorenet = get_model(self.config)
         scorenet = torch.nn.DataParallel(scorenet)
+
+        dnet = get_deterministic_model(self.config)
+        dnet = torch.nn.DataParallel(dnet)
 
         logging.info(f"Number of parameters: {count_parameters(scorenet)}")
         logging.info(f"Number of trainable parameters: {count_training_parameters(scorenet)}")
@@ -455,11 +536,13 @@ class NCSNRunner():
 
                 # Loss
                 itr_start = time.time()
-                loss = anneal_dsm_score_estimation(scorenet, X, labels=None, cond=cond, cond_mask=cond_mask,
-                                                   loss_type=getattr(self.config.training, 'loss_type', 'a'),
-                                                   gamma=getattr(self.config.model, 'gamma', False),
-                                                   L1=getattr(self.config.training, 'L1', False), hook=hook,
-                                                   all_frames=getattr(self.config.model, 'output_all_frames', False))
+                loss = anneal_dsm_score_estimation_dwp(
+                    scorenet, dnet, X, labels=None, cond=cond, cond_mask=cond_mask,
+                    loss_type=getattr(self.config.training, 'loss_type', 'a'),
+                    gamma=getattr(self.config.model, 'gamma', False),
+                    L1=getattr(self.config.training, 'L1', False), hook=hook,
+                    all_frames=getattr(self.config.model, 'output_all_frames', False),
+                    c_per_frame=self.config.data.channels)
                 # tb_logger.add_scalar('loss', loss, global_step=step)
                 # tb_hook()
 
@@ -545,11 +628,13 @@ class NCSNRunner():
                                                                         conditional=conditional)
 
                     with torch.no_grad():
-                        test_dsm_loss = anneal_dsm_score_estimation(test_scorenet, test_X, labels=None, cond=test_cond, cond_mask=test_cond_mask,
-                                                                    loss_type=getattr(self.config.training, 'loss_type', 'a'),
-                                                                    gamma=getattr(self.config.model, 'gamma', False),
-                                                                    L1=getattr(self.config.training, 'L1', False), hook=test_hook,
-                                                                    all_frames=getattr(self.config.model, 'output_all_frames', False))
+                        test_dsm_loss = anneal_dsm_score_estimation_dwp(
+                            test_scorenet, dnet, test_X, labels=None, cond=test_cond, cond_mask=test_cond_mask,
+                            loss_type=getattr(self.config.training, 'loss_type', 'a'),
+                            gamma=getattr(self.config.model, 'gamma', False),
+                            L1=getattr(self.config.training, 'L1', False), hook=test_hook,
+                            all_frames=getattr(self.config.model, 'output_all_frames', False),
+                            c_per_frame=self.config.data.channels)
                     # tb_logger.add_scalar('test_loss', test_dsm_loss, global_step=step)
                     # test_tb_hook()
                     self.losses_test.update(test_dsm_loss.item(), step)
@@ -573,7 +658,7 @@ class NCSNRunner():
                     # Calc video metrics with max_data_iter=1
                     if conditional and step % self.config.training.snapshot_freq == 0 and self.config.training.snapshot_sampling: # only at snapshot_freq, not at sample_freq
 
-                        vid_metrics = self.video_gen(scorenet=test_scorenet, ckpt=step, train=True)
+                        vid_metrics = self.video_gen(scorenet=test_scorenet, dnet=dnet, ckpt=step, train=True)
 
                         if 'mse' in vid_metrics.keys():
                             self.mses.update(vid_metrics['mse'], step)
@@ -1383,7 +1468,7 @@ class NCSNRunner():
             torch.save(gen_samples, os.path.join(self.args.image_folder, 'samples_{}.pt'.format(ckpt)))
 
     @torch.no_grad()
-    def video_gen(self, scorenet=None, ckpt=None, train=False):
+    def video_gen(self, scorenet=None, dnet=None, ckpt=None, train=False):
         # Sample n predictions per test data, choose the best among them for each metric
 
         calc_ssim = getattr(self.config.sampling, "ssim", False)
@@ -1467,6 +1552,9 @@ class NCSNRunner():
                 ema_helper.load_state_dict(states[-1])
                 ema_helper.ema(scorenet)
 
+        if dnet is None:
+            dnet = get_deterministic_model(self.config)
+            dnet = torch.nn.DataParallel(dnet)
 
         net = scorenet.module if hasattr(scorenet, 'module') else scorenet
 
@@ -1602,6 +1690,13 @@ class NCSNRunner():
                                       gamma=getattr(self.config.model, 'gamma', False))
                 gen_samples = gen_samples[-1].reshape(gen_samples[-1].shape[0], self.config.data.channels*self.config.data.num_frames,
                                                       self.config.data.image_size, self.config.data.image_size)
+                # add the result with d model
+                # d_in = rearrange(real_[:,,...], 'b (t c) h w -> b t c h w', c=self.config.data.channels)
+                d_in = real_[:, 0: real_.shape[1] - self.config.sampling.num_frames_pred, ...]
+                d_out, _ = dnet(d_in)
+                d_out = rearrange(d_out, 'b t c h w -> b (t c) h w')
+                # gen_samples = gen_samples + d_out
+                gen_samples = d_out + d_out
                 pred_samples.append(gen_samples.to('cpu'))
 
                 if i_frame == n_iter_frames - 1:
@@ -2468,6 +2563,9 @@ class NCSNRunner():
         scorenet = get_model(self.config)
         scorenet = torch.nn.DataParallel(scorenet)
 
+        dnet = get_deterministic_model(self.config)
+        dnet = torch.nn.DataParallel(dnet)
+
         if self.config.data.dataset.upper() == 'FFHQ':
             test_dataloader = FFHQ_TFRecordsDataLoader([self.args.data_path], self.config.test.batch_size, self.config.data.image_size)
         else:
@@ -2508,11 +2606,13 @@ class NCSNRunner():
                                                      conditional=conditional)
 
                 with torch.no_grad():
-                    test_loss = anneal_dsm_score_estimation(scorenet, x, labels=None, cond=cond, cond_mask=cond_mask,
-                                                            loss_type=getattr(self.config.training, 'loss_type', 'a'),
-                                                            gamma=getattr(self.config.model, 'gamma', False),
-                                                            L1=getattr(self.config.training, 'L1', False),
-                                                            all_frames=getattr(self.config.model, 'output_all_frames', False))
+                    test_loss = anneal_dsm_score_estimation_dwp(
+                        scorenet, dnet, x, labels=None, cond=cond, cond_mask=cond_mask,
+                        loss_type=getattr(self.config.training, 'loss_type', 'a'),
+                        gamma=getattr(self.config.model, 'gamma', False),
+                        L1=getattr(self.config.training, 'L1', False),
+                        all_frames=getattr(self.config.model, 'output_all_frames', False),
+                        c_per_frame=self.config.data.channels)
                     if verbose:
                         logging.info("step: {}, test_loss: {}".format(step, test_loss.item()))
 

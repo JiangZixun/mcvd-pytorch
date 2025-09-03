@@ -3,10 +3,10 @@ training:
   batch_size: 8
   n_epochs: 1000000
   n_iters: 3000001
-  snapshot_freq: 5000
+  snapshot_freq: 10000
   # snapshot_freq: 100
   snapshot_sampling: true
-  sample_freq: 5000
+  sample_freq: 10000
   # sample_freq: 100
   val_freq: 100
   log_freq: 50
@@ -41,9 +41,9 @@ sampling:
 fast_fid:
   batch_size: 8
   num_samples: 1
-  begin_ckpt: 5000
+  begin_ckpt: 10000
   # begin_ckpt: 100
-  freq: 5000
+  freq: 10000
   # freq: 100
   end_ckpt: 300000
   pr_nn_k: 3
@@ -85,7 +85,7 @@ data:
   prob_mask_sync: false
 
 model:
-  depth: deep
+  depth: deeper
   version: DDPM
   gamma: false
   arch: unetmore
@@ -101,7 +101,7 @@ model:
   spec_norm: false
   normalization: InstanceNorm++
   nonlinearity: swish
-  ngf: 64
+  ngf: 96
   ch_mult: 
     - 1
     - 2
@@ -112,7 +112,7 @@ model:
     - 8
     - 16
     - 32 # can use only 16 for traditional
-  n_head_channels: 64 # -1 for traditional
+  n_head_channels: 96 # -1 for traditional
   conditional: true
   noise_in_cond: false
   output_all_frames: false # could be useful especially for 3d models
@@ -124,13 +124,13 @@ optim:
   weight_decay: 0.000
   optimizer: "Adam"
   lr: 0.0002
-  warmup: 1000
+  warmup: 5000
   beta1: 0.9
   amsgrad: false
   eps: 0.00000001
   grad_clip: 1.0
 
 wandb:
-  use: true
+  use: false
   project: "Himawari-MCVD"
-  name: "v1"
+  name: "v2"

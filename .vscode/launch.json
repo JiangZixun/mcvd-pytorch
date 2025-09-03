@@ -2,18 +2,18 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Run HIMAWARI DDPM",
+      "name": "Run HIMAWARI DDPM DWP",
       "type": "debugpy",
       "request": "launch",
       "python": "/home/jzx/anaconda3/envs/vid/bin/python",
-      "program": "main.py",
+      "program": "main_dwp.py",
       "console": "integratedTerminal",
       "cwd": "${workspaceFolder}",
       "env": {
         "CUDA_VISIBLE_DEVICES": "0"
       },
       "args": [
-        "--config", "configs/himawari_DDPM_big5.yml",
+        "--config", "configs/himawari_DDPM_dwp.yml",
         "--data_path", "data",
         "--exp", "experiments/debug",
         "--ni"

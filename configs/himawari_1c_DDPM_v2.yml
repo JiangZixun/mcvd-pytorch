@@ -3,13 +3,13 @@ training:
   batch_size: 8
   n_epochs: 1000000
   n_iters: 3000001
-  snapshot_freq: 5000
+  snapshot_freq: 10000
   # snapshot_freq: 100
   snapshot_sampling: true
-  sample_freq: 5000
+  sample_freq: 10000
   # sample_freq: 100
-  val_freq: 100
-  log_freq: 50
+  val_freq: 1000
+  log_freq: 100
   log_all_sigmas: false
 
 sampling:
@@ -19,9 +19,9 @@ sampling:
   final_only: true
   fid: false
   ssim: true
-  fvd: true
+  fvd: false
   denoise: true
-  subsample: 1000
+  subsample: 100
   num_samples4fid: 10000
   num_samples4fvd: 10000
   inpainting: false
@@ -59,7 +59,7 @@ test:
   batch_size: 8
 
 data:
-  dataset: "HIMAWARI"
+  dataset: "HIMAWARI1C"
   # ---------------------------------------------------------
   train_data_path: '/mnt/data1/Dataset/Himawari8/train/xiaoshan_6steps_30min_Data_day.h5'
   train_json_path: '/mnt/data1/Dataset/Himawari8/train/xiaoshan_6steps_30min_Data_day_all.json'
@@ -70,7 +70,7 @@ data:
   test_prefix: '2023'
   # ---------------------------------------------------------
   image_size: 256
-  channels: 8
+  channels: 1
   logit_transform: false
   uniform_dequantization: false
   gaussian_dequantization: false
@@ -85,7 +85,7 @@ data:
   prob_mask_sync: false
 
 model:
-  depth: deep
+  depth: deeper
   version: DDPM
   gamma: false
   arch: unetmore
@@ -101,7 +101,7 @@ model:
   spec_norm: false
   normalization: InstanceNorm++
   nonlinearity: swish
-  ngf: 64
+  ngf: 96
   ch_mult: 
     - 1
     - 2
@@ -112,7 +112,7 @@ model:
     - 8
     - 16
     - 32 # can use only 16 for traditional
-  n_head_channels: 64 # -1 for traditional
+  n_head_channels: 96 # -1 for traditional
   conditional: true
   noise_in_cond: false
   output_all_frames: false # could be useful especially for 3d models
@@ -124,13 +124,13 @@ optim:
   weight_decay: 0.000
   optimizer: "Adam"
   lr: 0.0002
-  warmup: 1000
+  warmup: 5000
   beta1: 0.9
   amsgrad: false
   eps: 0.00000001
   grad_clip: 1.0
 
 wandb:
-  use: true
+  use: false
   project: "Himawari-MCVD"
   name: "v1"
